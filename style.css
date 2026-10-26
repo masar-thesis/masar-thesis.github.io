@@ -65,7 +65,7 @@ a { color: var(--sage-strong); }
 .icon-btn:hover { border-color: var(--sage); }
 .icon-btn svg { width: 18px; height: 18px; }
 
-main { max-width: 1120px; margin: 0 auto; padding: 20px 16px 96px; }
+main { max-width: 1120px; margin: 0 auto; padding: 20px 16px 8px; }
 .bottom-nav { display: none; }
 @media (max-width: 760px) {
   .tabs { display: none; }
@@ -274,3 +274,7 @@ h2.title-ro { font-size: 21px; margin: 0; }
 .editor table, .content-ro table { border-collapse: collapse; width: 100%; margin: 8px 0; }
 .editor td, .editor th, .content-ro td, .content-ro th { border: 1px solid var(--border); padding: 6px 8px; text-align: start; vertical-align: top; }
 .editor th, .content-ro th { background: var(--surface-2); }
+.linklike { border: 0; background: none; padding: 0; margin-top: 12px; color: var(--sage-strong); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.credit { text-align: center; color: var(--muted); font-size: 12.5px; margin: 18px auto 0; padding: 0 16px; max-width: 420px; line-height: 1.7; }
+.credit.app { max-width: 1120px; margin: 12px auto 0; padding: 0 16px 96px; }
+@media (min-width: 761px) { .credit.app { padding-bottom: 28px; } }

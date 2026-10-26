@@ -9,6 +9,9 @@ const BUCKET = 'stu-files';
 const MAX_FILE = 10 * 1024 * 1024;
 const K = { theme: 'masar_stu_theme', sv: 'masar_stu_sv', pin: 'masar_stu_pin' };
 
+const RECOVERY = /type=recovery/.test(location.hash);
+const LINK_ERROR = /error_code=|error_description=/.test(location.hash);
+const CREDIT = 'صُنعت بشغف من الباحثة نوره المحمدي لزميلاتي الباحثات';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'masar_stu_auth' } });
 
 const STATUS = {
@@ -114,6 +117,12 @@ async function logActivity(kind, section_id, text) {
 
 /* ---------- boot ---------- */
 async function boot() {
+  if (RECOVERY || LINK_ERROR) {
+    const { data: { session } } = await sb.auth.getSession();
+    history.replaceState(null, '', location.pathname + location.search);
+    if (RECOVERY && session) return renderNewPassword(session);
+    return renderLogin('رابط استعادة كلمة المرور غير صالح أو انتهت مدته. اطلبي رابطًا جديدًا.');
+  }
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get('s')) {
     ls.set(K.sv, hash.get('s'));
@@ -208,9 +217,20 @@ function renderLogin(msg = '', signup = false) {
       <p class="small" id="lmsg" style="color:var(--danger);min-height:1.2em;margin:0 0 8px">${esc(msg)}</p>
       <button class="btn primary" type="submit" style="width:100%;justify-content:center">${signup ? 'إنشاء الحساب' : 'دخول'}</button>
     </form>
+    ${signup ? '' : '<button type="button" class="linklike" id="forgot">نسيت كلمة المرور؟</button>'}
     <p class="small muted" style="margin:16px 0 0">مشرفتك تدخل من رابط خاص ترسلينه لها، بدون تسجيل.</p>
     ${signup ? '<p class="small muted" style="margin:8px 0 0">مساحتك مقفولة عليك وعلى مشرفتك فقط داخل المنصة. البيانات محفوظة في خدمة Supabase.</p>' : ''}
-  </div></div>`;
+  </div><p class="credit">${CREDIT}</p></div>`;
+  if ($('#forgot')) $('#forgot').onclick = async () => {
+    const email = $('#le').value.trim().toLowerCase(), m = $('#lmsg');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { m.textContent = 'اكتبي إيميلك فوق أولًا، وبعدها اضغطي «نسيت كلمة المرور».'; $('#le').focus(); return; }
+    m.textContent = '…';
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    if (error && /rate|limit|seconds/i.test(error.message)) { m.textContent = 'طلبات كثيرة خلال وقت قصير، حاولي بعد شوي.'; return; }
+    if (error) { console.error(error); m.textContent = 'تعذّر الإرسال، حاولي مرة ثانية.'; return; }
+    m.style.color = 'var(--sage-strong)';
+    m.textContent = 'إذا كان الإيميل مسجّل، بيوصلك رابط لتعيين كلمة مرور جديدة. شيكي على البريد غير المرغوب أيضًا.';
+  };
   $('#t_in').onclick = () => renderLogin('', false);
   $('#t_up').onclick = () => renderLogin('', true);
   $('#lf').onsubmit = async (e) => {
@@ -227,6 +247,31 @@ function renderLogin(msg = '', signup = false) {
     const { data, error } = await sb.auth.signInWithPassword({ email, password });
     if (error) { m.textContent = signup ? 'تم إنشاء الحساب، لكن تعذّر الدخول. جرّبي «دخول».' : 'الإيميل أو كلمة المرور غير صحيحة.'; return; }
     startStudent(data.session);
+  };
+}
+
+function renderNewPassword(session) {
+  $('#app').innerHTML = `
+  <div class="login"><div class="card">
+    <div class="logo-mark big" style="margin:0"></div>
+    <h1>كلمة مرور جديدة</h1>
+    <p class="muted" style="margin-top:0">اختاري كلمة مرور جديدة لحسابك.</p>
+    <form id="nf">
+      <label class="field">كلمة المرور الجديدة (6 أحرف على الأقل)<input class="input" id="np" type="password" dir="ltr" minlength="6" required autocomplete="new-password"></label>
+      <label class="field">تأكيدها<input class="input" id="np2" type="password" dir="ltr" minlength="6" required autocomplete="new-password"></label>
+      <p class="small" id="nmsg" style="color:var(--danger);min-height:1.2em;margin:0 0 8px"></p>
+      <button class="btn primary" type="submit" style="width:100%;justify-content:center">حفظ ودخول</button>
+    </form>
+  </div><p class="credit">${CREDIT}</p></div>`;
+  $('#nf').onsubmit = async (e) => {
+    e.preventDefault();
+    const a = $('#np').value, b = $('#np2').value, m = $('#nmsg');
+    if (a.length < 6) { m.textContent = 'كلمة المرور 6 أحرف على الأقل.'; return; }
+    if (a !== b) { m.textContent = 'كلمتا المرور غير متطابقتين.'; return; }
+    m.textContent = '…';
+    const { error } = await sb.auth.updateUser({ password: a });
+    if (error) { console.error(error); m.textContent = /different|same/i.test(error.message) ? 'اختاري كلمة مرور مختلفة عن القديمة.' : 'تعذّر الحفظ، حاولي مرة ثانية.'; return; }
+    toast('تم تغيير كلمة المرور ✓'); startStudent(session);
   };
 }
 
@@ -272,6 +317,7 @@ function render() {
     <button class="icon-btn" id="theme" title="الوضع الداكن">${isDark() ? I.sun : I.moon}</button>
   </div></header>
   <main id="main"></main>
+  <footer class="credit app">${CREDIT}</footer>
   <nav class="bottom-nav">${nav.map((n) => `<button class="${S.view === n.id ? 'active' : ''}" data-nav="${n.id}">${n.icon}<span>${n.label}</span></button>`).join('')}</nav>`;
   document.querySelectorAll('[data-nav]').forEach((b) => b.onclick = () => go(b.dataset.nav, b.dataset.nav === 'thesis' ? null : undefined));
   $('#theme').onclick = toggleTheme;
@@ -739,7 +785,7 @@ function viewSettings(m) {
   </div>
   <div class="card"><h2>الحساب</h2>
     <p class="small muted" style="margin-top:0">مسجّلة بالإيميل <span dir="ltr">${esc(S.email)}</span></p>
-    <button class="btn" id="out">تسجيل الخروج</button>
+    <div class="row"><button class="btn" id="chpw">تغيير كلمة المرور</button><button class="btn" id="out">تسجيل الخروج</button></div>
   </div></div>`;
   const saveInfo = async (quiet) => {
     const upd = { thesis_title: $('#s_t').value.trim() || 'عنوان الرسالة', student_name: $('#s_r').value.trim(), supervisor_name: $('#s_s').value.trim() || 'المشرفة' };
@@ -751,6 +797,23 @@ function viewSettings(m) {
   };
   ['#s_t', '#s_r', '#s_s'].forEach((id) => $(id).onchange = () => saveInfo(true));
   $('#s_save').onclick = () => saveInfo(false);
+  $('#chpw').onclick = async () => {
+    const r = await modal(`<h3>تغيير كلمة المرور</h3>
+      <label class="field">الجديدة (6 أحرف على الأقل)<input class="input" id="cp1" type="password" dir="ltr" autocomplete="new-password"></label>
+      <label class="field">تأكيدها<input class="input" id="cp2" type="password" dir="ltr" autocomplete="new-password"></label>
+      <p class="small" id="cpm" style="color:var(--danger);min-height:1.2em;margin:0"></p>
+      <div class="actions"><button class="btn primary" id="ok">حفظ</button><button class="btn ghost" data-close>إلغاء</button></div>`,
+      (md, close) => { md.querySelector('#ok').onclick = () => {
+        const a = md.querySelector('#cp1').value, b = md.querySelector('#cp2').value, msg = md.querySelector('#cpm');
+        if (a.length < 6) { msg.textContent = 'كلمة المرور 6 أحرف على الأقل.'; return; }
+        if (a !== b) { msg.textContent = 'كلمتا المرور غير متطابقتين.'; return; }
+        close(a);
+      }; });
+    if (!r) return;
+    const { error } = await sb.auth.updateUser({ password: r });
+    if (error) { console.error(error); return toast(/different|same/i.test(error.message) ? 'اختاري كلمة مرور مختلفة عن القديمة' : 'تعذّر تغيير كلمة المرور'); }
+    toast('تم تغيير كلمة المرور ✓');
+  };
   $('#cp').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('تم نسخ الرابط'); } catch (e) { prompt2('انسخي الرابط', link); } };
   $('#rot').onclick = async () => {
     if (!(await confirm2('الرابط الحالي بيتعطل فورًا، ولازم ترسلين للمشرفة الرابط الجديد. متأكدة؟', 'إنشاء رابط جديد'))) return;
