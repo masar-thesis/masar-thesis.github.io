@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مسار — منصة متابعة الرسائل العلمية</title>
+<meta name="description" content="مساحة بسيطة لكل باحثة تتابع فيها رسالتها مع مشرفتها: الأقسام، الملاحظات، الاعتماد، المواعيد والمهام.">
+<meta name="theme-color" content="#6F9A7B">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%236F9A7B'/><path d='M14 44c10 0 12-24 22-24s8 14 14 14' stroke='%23fff' stroke-width='6' fill='none' stroke-linecap='round'/><circle cx='50' cy='34' r='5' fill='%23C9BCEB'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=1">
+<script>
+  try { const t = localStorage.getItem('masar_stu_theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body>
+  <div id="app"><div class="boot"><div class="logo-mark big"></div><p>جارٍ التحميل…</p></div></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="modal-root"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>
