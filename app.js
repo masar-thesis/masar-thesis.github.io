@@ -11,7 +11,7 @@ const K = { theme: 'masar_stu_theme', sv: 'masar_stu_sv', pin: 'masar_stu_pin' }
 
 const RECOVERY = /type=recovery/.test(location.hash);
 const LINK_ERROR = /error_code=|error_description=/.test(location.hash);
-const CREDIT = 'صُنعت بشغف من الباحثة نوره المحمدي لزميلاتي الباحثات';
+const CREDIT = 'صُنعت بشغف من الباحثة نوره المحمدي لزميلاتي الباحثات ❤️';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'masar_stu_auth' } });
 
 const STATUS = {
