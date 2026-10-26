@@ -12,6 +12,7 @@ const K = { theme: 'masar_stu_theme', sv: 'masar_stu_sv', pin: 'masar_stu_pin' }
 const RECOVERY = /type=recovery/.test(location.hash);
 const LINK_ERROR = /error_code=|error_description=/.test(location.hash);
 const CREDIT = 'صُنعت بشغف من الباحثة نوره المحمدي لزميلاتي الباحثات ❤️';
+const VAPID_PUBLIC = 'BLkzlFsSYNHtR6pdBVrK8hsbqxjeOuzLufl-D7aHA5Pg6dcLwnL0GDX5q6aUg7ndDvZvTBSbx-v4HHyhR0BL6Yg';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'masar_stu_auth' } });
 
 const STATUS = {
@@ -72,6 +73,106 @@ const I = {
   caret: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>',
 };
 
+/* ---------- whatsapp ---------- */
+// 05xxxxxxxx / 5xxxxxxxx / +9665… / 009665… → 9665xxxxxxxx ; other countries: digits as typed
+function normPhone(v) {
+  let d = String(v || '').replace(/[٠-٩]/g, (c) => '٠١٢٣٤٥٦٧٨٩'.indexOf(c)).replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('00')) d = d.slice(2);
+  if (/^05\d{8}$/.test(d)) d = '966' + d.slice(1);
+  else if (/^5\d{8}$/.test(d)) d = '966' + d;
+  return d.length >= 8 && d.length <= 15 ? d : null;
+}
+const waHref = (phone, text) => `https://wa.me/${phone || ''}?text=${encodeURIComponent(text)}`;
+const siteUrl = () => location.origin + location.pathname;
+const secLink = (id) => `${siteUrl()}#sec=${id}`;
+
+function waPrompt(title, sub, phone, text) {
+  return modal(`<h3>${esc(title)}</h3><p class="small muted" style="margin-top:0">${esc(sub)}</p>
+    <div class="wa-preview">${esc(text)}</div>
+    ${phone ? '' : '<p class="small muted">ما فيه رقم محفوظ، بيفتح لك واتساب وتختارين المحادثة.</p>'}
+    <div class="actions"><a class="btn wa" id="wa" target="_blank" rel="noopener" href="${waHref(phone, text)}">إرسال على واتساب</a><button class="btn ghost" data-close>لا، شكرًا</button></div>`,
+    (m, close) => { m.querySelector('#wa').addEventListener('click', () => setTimeout(() => close(true), 300)); });
+}
+
+/* ---------- push notifications ---------- */
+const PUSH = {
+  supported: () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window,
+  ios: () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1),
+  standalone: () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
+  reg: null,
+  async init() {
+    if (!('serviceWorker' in navigator)) return;
+    try { PUSH.reg = await navigator.serviceWorker.register('sw.js'); } catch (e) { console.warn('sw', e); }
+  },
+  async current() {
+    if (!PUSH.supported()) return null;
+    const reg = PUSH.reg || await navigator.serviceWorker.ready;
+    return reg.pushManager.getSubscription();
+  },
+  key() {
+    const b = atob(VAPID_PUBLIC.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (VAPID_PUBLIC.length % 4)) % 4));
+    return Uint8Array.from(b, (c) => c.charCodeAt(0));
+  },
+  async enable() {
+    if (!PUSH.supported()) throw new Error('unsupported');
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return false;
+    const reg = PUSH.reg || await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: PUSH.key() });
+    const j = sub.toJSON();
+    const args = { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth };
+    const { error } = S.mode === 'supervisor'
+      ? await sb.rpc('stu_sv_push_subscribe', { p_token: S.sv.token, p_pin: S.sv.pin, ...args })
+      : await sb.rpc('stu_push_subscribe', args);
+    if (error) throw error;
+    return true;
+  },
+  async disable() {
+    const sub = await PUSH.current();
+    if (sub) { await sb.rpc('stu_push_unsubscribe', { p_endpoint: sub.endpoint }); await sub.unsubscribe(); }
+  },
+  // 'on' | 'off' | 'denied' | 'ios-install' | 'unsupported'
+  async state() {
+    if (!PUSH.supported()) return PUSH.ios() && !PUSH.standalone() ? 'ios-install' : 'unsupported';
+    if (Notification.permission === 'denied') return 'denied';
+    const sub = await PUSH.current();
+    if (!sub) return 'off';
+    if (S.mode === 'supervisor') {
+      const { data } = await sb.rpc('stu_sv_has_push', { p_token: S.sv.token, p_pin: S.sv.pin, p_endpoint: sub.endpoint });
+      return data ? 'on' : 'off';
+    }
+    const { data } = await sb.from('stu_push_subs').select('id').eq('endpoint', sub.endpoint).maybeSingle();
+    return data ? 'on' : 'off';
+  },
+};
+const PUSH_TEXT = {
+  'ios-install': 'على الآيفون: افتحي المنصة من Safari، اضغطي زر المشاركة ⬆️ ثم «إضافة إلى الشاشة الرئيسية»، وافتحيها من الأيقونة الجديدة وفعّلي التنبيهات من هنا.',
+  unsupported: 'هذا المتصفح ما يدعم التنبيهات. جربي Chrome أو Safari بآخر إصدار.',
+  denied: 'التنبيهات مقفلة من إعدادات المتصفح لهذا الموقع. فعّليها من إعدادات المتصفح وارجعي هنا.',
+};
+
+// renders a small notifications block into `el`
+async function pushBlock(el, who) {
+  if (!el) return;
+  const st = await PUSH.state();
+  const what = who === 'supervisor' ? `يوصلك تنبيه على جهازك أول ما ترسل ${esc(S.settings.student_name || 'الباحثة')} قسم للمراجعة.` : 'يوصلك تنبيه على جوالك أول ما تعلّق مشرفتك أو تعتمد أو تطلب تعديل.';
+  el.innerHTML = st === 'on'
+    ? `<p class="small" style="margin:0 0 10px;color:var(--sage-strong)">التنبيهات مفعّلة على هذا الجهاز ✓</p><button class="btn sm ghost" id="pushoff">إيقاف التنبيهات</button>`
+    : st === 'off'
+      ? `<p class="small muted" style="margin:0 0 10px">${what}</p><button class="btn primary" id="pushon">🔔 تفعيل التنبيهات</button>`
+      : `<p class="small muted" style="margin:0">${esc(PUSH_TEXT[st])}</p>`;
+  const on = el.querySelector('#pushon'), off = el.querySelector('#pushoff');
+  if (on) on.onclick = async () => {
+    on.disabled = true;
+    try { const ok = await PUSH.enable(); toast(ok ? 'تم تفعيل التنبيهات 🔔' : 'ما تم السماح بالتنبيهات'); }
+    catch (e) { fail(e); }
+    pushBlock(el, who);
+  };
+  if (off) off.onclick = async () => { try { await PUSH.disable(); toast('تم إيقاف التنبيهات'); } catch (e) { fail(e); } pushBlock(el, who); };
+}
+
 /* ---------- theme ---------- */
 function isDark() {
   const t = document.documentElement.dataset.theme;
@@ -117,6 +218,7 @@ async function logActivity(kind, section_id, text) {
 
 /* ---------- boot ---------- */
 async function boot() {
+  PUSH.init();
   if (RECOVERY || LINK_ERROR) {
     const { data: { session } } = await sb.auth.getSession();
     history.replaceState(null, '', location.pathname + location.search);
@@ -359,12 +461,24 @@ function viewHome(m) {
       ${fresh.length ? `<ul class="list">${fresh.slice(0, 12).map(actLi).join('')}</ul>` : `<p class="empty">لا جديد ${S.prevSeen ? 'منذ ' + ago(S.prevSeen).replace('قبل ', '') : ''}.</p>`}
     </div>
     ${priority}
+    <div class="card" id="pushcard" hidden><div class="row" style="margin-bottom:6px"><h2 style="margin:0">التنبيهات</h2><span class="spacer"></span>${S.mode === 'student' ? '<button class="btn sm ghost" id="pushdismiss" aria-label="إخفاء">✕</button>' : ''}</div><div id="pushbody"></div></div>
     <div class="card"><h2>المواعيد المتفق عليها</h2>
       ${dues.length ? `<div class="timeline">${dues.map((s) => `<div class="tl-item ${s.status === 'approved' ? 'done' : ''} ${isLate(s) ? 'late' : ''}" data-sec="${s.id}"><div class="d">${fmtDate(s.due_date)} ${isLate(s) ? '<span class="chip late">متأخر</span>' : ''}</div><div>${esc(s.title)} <span class="chip ${STATUS[s.status].cls}">${STATUS[s.status].label}</span></div></div>`).join('')}</div>` : '<p class="empty">لم تُحدَّد مواعيد بعد. تُضاف عند إرسال قسم للمراجعة، أو من صفحة القسم.</p>'}
     </div>
     <div class="card"><h2>آخر النشاطات</h2>${recent.length ? `<ul class="list">${recent.map(actLi).join('')}</ul>` : '<p class="empty">لا نشاطات بعد.</p>'}</div>
   </div>`;
   m.querySelectorAll('[data-sec]').forEach((el) => el.dataset.sec && (el.onclick = () => go('thesis', el.dataset.sec)));
+  if (S.mode === 'student' || S.mode === 'supervisor') {
+    const card = $('#pushcard');
+    const dismissKey = 'masar_stu_push_hint';
+    PUSH.state().then((st) => {
+      if (!card || !card.isConnected) return;
+      if (S.mode === 'student' && (st !== 'off' || ls.get(dismissKey))) return;
+      if (S.mode === 'supervisor' && !['off', 'on', 'ios-install'].includes(st)) return;
+      card.hidden = false; pushBlock($('#pushbody'), S.mode);
+      const x = $('#pushdismiss'); if (x) x.onclick = () => { ls.set(dismissKey, '1'); card.hidden = true; };
+    });
+  }
 }
 
 /* ---------- thesis ---------- */
@@ -586,6 +700,11 @@ async function sendComment(s) {
     } else {
       const { error } = await sb.rpc('stu_sv_comment', { p_token: S.sv.token, p_pin: S.sv.pin, p_section: s.id, p_body: body });
       if (error) throw error; await loadSupervisor();
+      render(); toast('تم الإرسال');
+      const name = S.settings.student_name || '';
+      await waPrompt('تبلّغينها على واتساب؟', 'إذا تبغين توصلها الملاحظة على طول.', normPhone(S.settings.student_phone),
+        `أهلًا ${name} 🌿\nأضفت لك ملاحظة على «${s.title}» في منصة مسار:\n${body.slice(0, 400)}${body.length > 400 ? '…' : ''}\n\n${secLink(s.id)}`);
+      return;
     }
     render(); toast('تم الإرسال');
   } catch (e) { fail(e); $('#cms').disabled = false; }
@@ -694,6 +813,9 @@ async function submitDialog(s) {
       await logActivity('due', n.id, `موعد تسليم «${n.title}»: ${fmtDate(r.date)}`);
     }
     render(); toast('تم الإرسال للمشرفة');
+    const sv = (S.settings.supervisor_name || '').trim();
+    await waPrompt('تبلّغين مشرفتك على واتساب؟', 'رسالة قصيرة فيها رابط القسم مباشرة.', normPhone(S.settings.supervisor_phone),
+      `السلام عليكم ${sv && sv !== 'المشرفة' ? sv : 'دكتورة'} 🌿\nأرسلت لك «${s.title}» للمراجعة على منصة مسار${r.note ? ':\n' + r.note.slice(0, 300) : ''}\n\n${svLink()}&sec=${s.id}`);
   } catch (e) { fail(e); }
 }
 
@@ -707,6 +829,11 @@ async function reviewDialog(s, status) {
   const { error } = await sb.rpc('stu_sv_set_status', { p_token: S.sv.token, p_pin: S.sv.pin, p_section: s.id, p_status: status, p_note: r.note });
   if (error) return fail(error);
   await loadSupervisor(); render(); toast(ap ? 'تم الاعتماد ✅' : 'تم إرسال الملاحظات');
+  const name = S.settings.student_name || '';
+  const note = r.note ? `\n${r.note.slice(0, 400)}${r.note.length > 400 ? '…' : ''}\n` : '\n';
+  await waPrompt('تبلّغينها على واتساب؟', 'إذا تبغين يوصلها القرار على طول.', normPhone(S.settings.student_phone),
+    ap ? `أهلًا ${name} 🌿\nاعتمدت «${s.title}» ✅${note}\n${secLink(s.id)}`
+       : `أهلًا ${name} 🌿\nكتبت لك ملاحظات على «${s.title}» ✏️${note}\n${secLink(s.id)}`);
 }
 
 /* ---------- tasks ---------- */
@@ -768,6 +895,8 @@ function viewSettings(m) {
     <label class="field">عنوان الرسالة<textarea class="input" id="s_t" rows="2">${esc(S.settings.thesis_title)}</textarea></label>
     <label class="field">اسمك<input class="input" id="s_r" value="${esc(S.settings.student_name)}"></label>
     <label class="field">اسم المشرفة (يظهر لها في الترحيب)<input class="input" id="s_s" value="${esc(S.settings.supervisor_name)}"></label>
+    <label class="field">رقم جوالك (اختياري، عشان تقدر مشرفتك تبلغك على واتساب)<input class="input" id="s_ph" inputmode="tel" dir="ltr" placeholder="05xxxxxxxx" value="${esc(S.settings.student_phone || '')}"></label>
+    <label class="field">رقم جوال المشرفة (اختياري، عشان تبلغينها بسرعة)<input class="input" id="s_sph" inputmode="tel" dir="ltr" placeholder="05xxxxxxxx" value="${esc(S.settings.supervisor_phone || '')}"></label>
     <button class="btn primary" id="s_save">حفظ</button>
   </div>
   <div class="card"><h2>رابط المشرفة</h2>
@@ -775,7 +904,7 @@ function viewSettings(m) {
     <div class="linkbox"><span style="flex:1">${esc(link)}</span></div>
     <div class="row" style="margin-top:10px">
       <button class="btn primary" id="cp">نسخ الرابط</button>
-      <a class="btn" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent('السلام عليكم دكتورة، هذا رابط منصة متابعة رسالتي، تقدرين تشوفين فيه تقدمي وتضيفين ملاحظاتك مباشرة:\n' + link)}">إرسال واتساب</a>
+      <a class="btn" target="_blank" rel="noopener" href="${waHref(normPhone(S.settings.supervisor_phone), 'السلام عليكم دكتورة، هذا رابط منصة متابعة رسالتي، تقدرين تشوفين فيه تقدمي وتضيفين ملاحظاتك مباشرة:\n' + link)}">إرسال واتساب</a>
       <button class="btn danger" id="rot">إنشاء رابط جديد</button>
     </div>
     <h2 style="margin-top:20px">رمز الدخول (اختياري)</h2>
@@ -783,19 +912,23 @@ function viewSettings(m) {
     <div class="row"><input class="input" id="pin" inputmode="numeric" maxlength="8" placeholder="4 أرقام" style="max-width:140px" dir="ltr">
       <button class="btn" id="pinset">حفظ الرمز</button>${S.settings.pin_hash ? '<button class="btn ghost" id="pinclr">إلغاء الرمز</button>' : ''}</div>
   </div>
+  <div class="card"><h2>التنبيهات</h2><div id="pushset"><p class="small muted" style="margin:0">…</p></div></div>
   <div class="card"><h2>الحساب</h2>
     <p class="small muted" style="margin-top:0">مسجّلة بالإيميل <span dir="ltr">${esc(S.email)}</span></p>
     <div class="row"><button class="btn" id="chpw">تغيير كلمة المرور</button><button class="btn" id="out">تسجيل الخروج</button></div>
   </div></div>`;
   const saveInfo = async (quiet) => {
-    const upd = { thesis_title: $('#s_t').value.trim() || 'عنوان الرسالة', student_name: $('#s_r').value.trim(), supervisor_name: $('#s_s').value.trim() || 'المشرفة' };
+    const ph = normPhone($('#s_ph').value), sph = normPhone($('#s_sph').value);
+    if (ph === null || sph === null) return toast('رقم الجوال غير صحيح، اكتبيه مثل 05xxxxxxxx');
+    const upd = { thesis_title: $('#s_t').value.trim() || 'عنوان الرسالة', student_name: $('#s_r').value.trim(), supervisor_name: $('#s_s').value.trim() || 'المشرفة', student_phone: ph || null, supervisor_phone: sph || null };
     const { error } = await sb.from('stu_workspaces').update(upd).eq('id', S.ws);
     if (error) return fail(error);
     Object.assign(S.settings, upd);
     const sub = $('.brand small'); if (sub) sub.textContent = upd.thesis_title;
     toast(quiet ? 'تم الحفظ تلقائيًا' : 'تم الحفظ');
   };
-  ['#s_t', '#s_r', '#s_s'].forEach((id) => $(id).onchange = () => saveInfo(true));
+  ['#s_t', '#s_r', '#s_s', '#s_ph', '#s_sph'].forEach((id) => $(id).onchange = () => saveInfo(true));
+  pushBlock($('#pushset'), 'student');
   $('#s_save').onclick = () => saveInfo(false);
   $('#chpw').onclick = async () => {
     const r = await modal(`<h3>تغيير كلمة المرور</h3>
@@ -873,6 +1006,8 @@ async function viewAdmin(m) {
     ${k(x.pending_review, 'قسم بانتظار المراجعة')}
     ${k(x.avg_progress + '%', 'متوسط الأقسام المعتمدة')}
     ${k(x.files, 'ملف مرفوع')}
+    ${k(x.push_students ?? 0, 'طالبة فعّلت التنبيهات', `${x.push_supervisors ?? 0} مشرفة`)}
+    ${k(x.phones ?? 0, 'طالبة أضافت رقمها', 'لتبليغ الواتساب')}
   </div>
   <div class="grid">
     <div class="card"><h2>الزيارات اليومية (آخر 30 يوم)</h2>

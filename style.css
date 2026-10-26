@@ -278,3 +278,5 @@ h2.title-ro { font-size: 21px; margin: 0; }
 .credit { text-align: center; color: var(--muted); font-size: 12.5px; margin: 18px auto 0; padding: 0 16px; max-width: 420px; line-height: 1.7; }
 .credit.app { max-width: 1120px; margin: 12px auto 0; padding: 0 16px 96px; }
 @media (min-width: 761px) { .credit.app { padding-bottom: 28px; } }
+.btn.wa { background: #1F9D55; border-color: #1F9D55; color: #fff; text-decoration: none; }
+.wa-preview { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; white-space: pre-wrap; line-height: 1.8; max-height: 180px; overflow: auto; margin-bottom: 10px; overflow-wrap: anywhere; }
